@@ -21,7 +21,7 @@ import (
 // Codeup 文件树接口：GET /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}/files/tree
 // query: ref=branch, path=subdir, type=DIRECT|RECURSIVE|FLATTEN
 //
-// 注意：按云效 OpenAPI 文档，响应是单个 TreeNode（非数组）。
+// 响应是 TreeNode 数组（当前目录或递归目录下的所有节点）。
 func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.GetRepoTreeResp, error) {
 	orgID, identity, err := c.resolveRepoCtx(ctx, opts.Token, opts.Owner, opts.Repo)
 	if err != nil {
@@ -42,7 +42,7 @@ func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.Ge
 		query["type"] = "DIRECT"
 	}
 
-	node, err := request.Get[TreeNode](c.client, ctx, path,
+	nodes, err := request.Get[[]*TreeNode](c.client, ctx, path,
 		request.WithHeader(c.authHeader(opts.Token)),
 		request.WithQuery(query),
 	)
@@ -50,8 +50,18 @@ func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.Ge
 		return nil, fmt.Errorf("get codeup tree: %w", err)
 	}
 
-	entries := make([]*domain.TreeEntry, 0, 1)
-	if node != nil && (node.ID != "" || node.Name != "" || node.Path != "") {
+	list := []*TreeNode{}
+	if nodes != nil {
+		list = *nodes
+	}
+	entries := make([]*domain.TreeEntry, 0, len(list))
+	for _, node := range list {
+		if node == nil {
+			continue
+		}
+		if node.ID == "" && node.Name == "" && node.Path == "" {
+			continue
+		}
 		entries = append(entries, &domain.TreeEntry{
 			Mode: codeupTypeToMode(node.Type),
 			Name: node.Name,
