@@ -89,6 +89,8 @@ func (p *TokenProvider) resolveToken(ctx context.Context, gi *db.GitIdentity) (s
 		return p.resolveOAuth(ctx, gi, p.refreshGitea)
 	case consts.GitPlatformGitee:
 		return p.resolveOAuth(ctx, gi, p.refreshGitee)
+	case consts.GitPlatformCodeup:
+		return p.resolveOAuth(ctx, gi, p.refreshCodeup)
 	default:
 		if gi.AccessToken == "" {
 			return "", 0, fmt.Errorf("git identity %s has no access token", gi.ID)
@@ -209,6 +211,20 @@ func (p *TokenProvider) refreshGitea(ctx context.Context, gi *db.GitIdentity) (s
 
 func (p *TokenProvider) refreshGitee(_ context.Context, gi *db.GitIdentity) (string, string, time.Time, error) {
 	resp, err := oauth.RefreshGitee(gi.OauthRefreshToken)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	return resp.AccessToken, resp.RefreshToken, time.Unix(resp.ExpiresAt(), 0), nil
+}
+
+// refreshCodeup 走阿里云通用 OAuth2 token endpoint 刷新云效 access_token。
+// site 配置中 BaseURL 视为可选的 token endpoint 覆盖，常规情况下留空走 account.aliyun.com。
+func (p *TokenProvider) refreshCodeup(ctx context.Context, gi *db.GitIdentity) (string, string, time.Time, error) {
+	site, err := p.resolveSiteConfig(ctx, gi.BaseURL)
+	if err != nil {
+		return "", "", time.Time{}, fmt.Errorf("resolve codeup site: %w", err)
+	}
+	resp, err := oauth.RefreshCodeup(site.BaseURL, site.ClientID, site.ClientSecret, gi.OauthRefreshToken, p.proxies...)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}

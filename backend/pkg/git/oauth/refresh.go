@@ -108,6 +108,47 @@ func RefreshGitea(baseURL, clientID, clientSecret, refreshToken string, proxies 
 	return result, nil
 }
 
+// CodeupTokenResponse 阿里云云效 OAuth Token 响应
+type CodeupTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+}
+
+func (r *CodeupTokenResponse) ExpiresAt() int64 {
+	return time.Now().Unix() + int64(r.ExpiresIn)
+}
+
+// RefreshCodeup 刷新云效 OAuth access_token
+//
+// 默认 token endpoint 走阿里云账号通用网关：https://account.aliyun.com/oauth2/v1/token
+// 如有定制（如专有云）可通过 tokenURL 显式覆盖
+func RefreshCodeup(tokenURL, clientID, clientSecret, refreshToken string, proxies ...string) (*CodeupTokenResponse, error) {
+	if tokenURL == "" {
+		tokenURL = "https://account.aliyun.com/oauth2/v1/token"
+	}
+	params := url.Values{}
+	params.Add("grant_type", "refresh_token")
+	params.Add("refresh_token", refreshToken)
+	params.Add("client_id", clientID)
+	params.Add("client_secret", clientSecret)
+
+	result, err := fetchWithProxyAndBody[CodeupTokenResponse](
+		http.MethodPost, tokenURL,
+		map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+		strings.NewReader(params.Encode()), proxies...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("refresh codeup token: %w", err)
+	}
+	if result.AccessToken == "" {
+		return nil, fmt.Errorf("refreshed codeup access token is empty")
+	}
+	return result, nil
+}
+
 // RefreshGitee 刷新 Gitee OAuth access_token（无需 client 凭证）
 func RefreshGitee(refreshToken string) (*GiteeTokenResponse, error) {
 	params := url.Values{}

@@ -8,4 +8,5 @@ const (
 	GitPlatformGitLab GitPlatform = "gitlab"
 	GitPlatformGitea  GitPlatform = "gitea"
 	GitPlatformGitee  GitPlatform = "gitee"
+	GitPlatformCodeup GitPlatform = "codeup"
 )

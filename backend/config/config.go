@@ -68,6 +68,7 @@ type Config struct {
 	Gitlab GitlabConfig `mapstructure:"gitlab"`
 	Gitea  GiteaConfig  `mapstructure:"gitea"`
 	Gitee  GiteeConfig  `mapstructure:"gitee"`
+	Codeup CodeupConfig `mapstructure:"codeup"`
 
 	// 微信配置（开放平台 OAuth 登录 + 公众号消息推送）
 	Wechat WechatConfig `mapstructure:"wechat"`
@@ -472,6 +473,25 @@ type GiteeOAuthConfig struct {
 	RedirectURL  string `mapstructure:"redirect_url"`
 }
 
+// CodeupConfig 阿里云云效 Codeup 配置
+type CodeupConfig struct {
+	// OpenAPI 域名（默认 https://openapi-rdc.aliyuncs.com，专有云可覆盖）
+	BaseURL string            `mapstructure:"base_url"`
+	Enabled bool              `mapstructure:"enabled"`
+	OAuth   CodeupOAuthConfig `mapstructure:"oauth"`
+}
+
+// CodeupOAuthConfig Codeup OAuth 配置（走阿里云账号 OAuth2）
+type CodeupOAuthConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURL  string `mapstructure:"redirect_url"`
+	// TokenURL 阿里云 OAuth2 token endpoint，默认 https://account.aliyun.com/oauth2/v1/token
+	TokenURL string `mapstructure:"token_url"`
+	// AuthorizeURL 阿里云 OAuth2 authorize endpoint，默认 https://account.aliyun.com/oauth2/v1/auth
+	AuthorizeURL string `mapstructure:"authorize_url"`
+}
+
 // IsGithubEnabled 检查 GitHub 是否启用
 func (c *Config) IsGithubEnabled() bool {
 	return c.Github.Enabled
@@ -610,6 +630,53 @@ func (c *Config) GetGiteeOAuthRedirectURL() string {
 		return c.Gitee.OAuth.RedirectURL
 	}
 	return c.Server.BaseURL + "/api/v1/oauth/gitee/callback"
+}
+
+// IsCodeupEnabled 检查 Codeup 是否启用
+func (c *Config) IsCodeupEnabled() bool {
+	return c.Codeup.Enabled
+}
+
+// GetCodeupBaseURL 获取 Codeup OpenAPI 域名（默认公共站）
+func (c *Config) GetCodeupBaseURL() string {
+	if c.Codeup.BaseURL != "" {
+		return c.Codeup.BaseURL
+	}
+	return "https://openapi-rdc.aliyuncs.com"
+}
+
+// GetCodeupOAuthClientID 获取 Codeup OAuth Client ID
+func (c *Config) GetCodeupOAuthClientID() string {
+	return c.Codeup.OAuth.ClientID
+}
+
+// GetCodeupOAuthClientSecret 获取 Codeup OAuth Client Secret
+func (c *Config) GetCodeupOAuthClientSecret() string {
+	return c.Codeup.OAuth.ClientSecret
+}
+
+// GetCodeupOAuthRedirectURL 获取 Codeup OAuth Redirect URL
+func (c *Config) GetCodeupOAuthRedirectURL() string {
+	if c.Codeup.OAuth.RedirectURL != "" {
+		return c.Codeup.OAuth.RedirectURL
+	}
+	return c.Server.BaseURL + "/api/v1/oauth/codeup/callback"
+}
+
+// GetCodeupOAuthTokenURL 获取 Codeup OAuth token endpoint（默认阿里云账号通用网关）
+func (c *Config) GetCodeupOAuthTokenURL() string {
+	if c.Codeup.OAuth.TokenURL != "" {
+		return c.Codeup.OAuth.TokenURL
+	}
+	return "https://account.aliyun.com/oauth2/v1/token"
+}
+
+// GetCodeupOAuthAuthorizeURL 获取 Codeup OAuth authorize endpoint
+func (c *Config) GetCodeupOAuthAuthorizeURL() string {
+	if c.Codeup.OAuth.AuthorizeURL != "" {
+		return c.Codeup.OAuth.AuthorizeURL
+	}
+	return "https://account.aliyun.com/oauth2/v1/auth"
 }
 
 // WechatConfig 微信配置（包含开放平台和公众号两部分）
