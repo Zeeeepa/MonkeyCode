@@ -19,11 +19,13 @@ import (
 // Tree 实现 GitClienter 接口
 //
 // Codeup 文件树接口：GET /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}/files/tree
-// query: ref=branch, path=subdir, type=DIRECT|RECURSIVE
+// query: ref=branch, path=subdir, type=DIRECT|RECURSIVE|FLATTEN
+//
+// 注意：按云效 OpenAPI 文档，响应是单个 TreeNode（非数组）。
 func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.GetRepoTreeResp, error) {
-	orgID, identity := c.splitRepoCtx(opts.Owner, opts.Repo)
-	if orgID == "" || identity == "" {
-		return nil, fmt.Errorf("codeup tree: missing org or repo identity")
+	orgID, identity, err := c.resolveRepoCtx(ctx, opts.Token, opts.Owner, opts.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("codeup tree: %w", err)
 	}
 
 	path := c.repoPath(orgID, identity) + "/files/tree"
@@ -40,7 +42,7 @@ func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.Ge
 		query["type"] = "DIRECT"
 	}
 
-	nodes, err := request.Get[[]*TreeNode](c.client, ctx, path,
+	node, err := request.Get[TreeNode](c.client, ctx, path,
 		request.WithHeader(c.authHeader(opts.Token)),
 		request.WithQuery(query),
 	)
@@ -48,13 +50,13 @@ func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.Ge
 		return nil, fmt.Errorf("get codeup tree: %w", err)
 	}
 
-	entries := make([]*domain.TreeEntry, 0, len(*nodes))
-	for _, n := range *nodes {
+	entries := make([]*domain.TreeEntry, 0, 1)
+	if node != nil && (node.ID != "" || node.Name != "" || node.Path != "") {
 		entries = append(entries, &domain.TreeEntry{
-			Mode: codeupTypeToMode(n.Type),
-			Name: n.Name,
-			Path: n.Path,
-			Sha:  n.ID,
+			Mode: codeupTypeToMode(node.Type),
+			Name: node.Name,
+			Path: node.Path,
+			Sha:  node.ID,
 		})
 	}
 	return &domain.GetRepoTreeResp{
@@ -65,16 +67,19 @@ func (c *Codeup) Tree(ctx context.Context, opts *domain.TreeOptions) (*domain.Ge
 
 // Blob 实现 GitClienter 接口
 //
-// Codeup 文件内容接口：GET /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}/files/blobs
-// query: filePath, ref
+// Codeup 文件内容接口：GET /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}/files/{filePath}
+// filePath 走 path 段，需要 URL-encode（含把 / 编成 %2F）；ref 是必填 query。
 func (c *Codeup) Blob(ctx context.Context, opts *domain.BlobOptions) (*domain.GetBlobResp, error) {
-	orgID, identity := c.splitRepoCtx(opts.Owner, opts.Repo)
-	if orgID == "" || identity == "" {
-		return nil, fmt.Errorf("codeup blob: missing org or repo identity")
+	orgID, identity, err := c.resolveRepoCtx(ctx, opts.Token, opts.Owner, opts.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("codeup blob: %w", err)
+	}
+	if opts.Path == "" {
+		return nil, fmt.Errorf("codeup blob: file path is required")
 	}
 
-	apiPath := c.repoPath(orgID, identity) + "/files/blobs"
-	query := request.Query{"filePath": opts.Path}
+	apiPath := c.repoPath(orgID, identity) + "/files/" + encodeFilePath(opts.Path)
+	query := request.Query{}
 	if opts.Ref != "" {
 		query["ref"] = opts.Ref
 	}
@@ -113,9 +118,9 @@ func (c *Codeup) Blob(ctx context.Context, opts *domain.BlobOptions) (*domain.Ge
 // Codeup commits 接口：GET /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}/commits
 // query: refName, path, page, perPage
 func (c *Codeup) Logs(ctx context.Context, opts *domain.LogsOptions) (*domain.GetGitLogsResp, error) {
-	orgID, identity := c.splitRepoCtx(opts.Owner, opts.Repo)
-	if orgID == "" || identity == "" {
-		return nil, fmt.Errorf("codeup logs: missing org or repo identity")
+	orgID, identity, err := c.resolveRepoCtx(ctx, opts.Token, opts.Owner, opts.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("codeup logs: %w", err)
 	}
 
 	limit := opts.Limit
@@ -162,14 +167,14 @@ func (c *Codeup) Logs(ctx context.Context, opts *domain.LogsOptions) (*domain.Ge
 			ParentShas: append([]string(nil), c.ParentIDs...),
 		}}
 		entry.Commit.Author = &domain.GitUser{
-			Name:  firstNonEmpty(c.AuthorName, userField(c.Author, "name")),
-			Email: firstNonEmpty(c.AuthorEmail, userField(c.Author, "email")),
-			When:  parseCodeupTime(firstNonEmpty(c.AuthoredDate, userField(c.Author, "date"))),
+			Name:  c.AuthorName,
+			Email: c.AuthorEmail,
+			When:  parseCodeupTime(c.AuthoredDate),
 		}
 		entry.Commit.Committer = &domain.GitUser{
-			Name:  firstNonEmpty(c.CommitterName, userField(c.Committer, "name"), entry.Commit.Author.Name),
-			Email: firstNonEmpty(c.CommitterEmail, userField(c.Committer, "email"), entry.Commit.Author.Email),
-			When:  parseCodeupTime(firstNonEmpty(c.CommittedDate, userField(c.Committer, "date"))),
+			Name:  firstNonEmpty(c.CommitterName, entry.Commit.Author.Name),
+			Email: firstNonEmpty(c.CommitterEmail, entry.Commit.Author.Email),
+			When:  parseCodeupTime(firstNonEmpty(c.CommittedDate, c.AuthoredDate)),
 		}
 		entries = append(entries, entry)
 	}
@@ -181,36 +186,51 @@ func (c *Codeup) Logs(ctx context.Context, opts *domain.LogsOptions) (*domain.Ge
 
 // Archive 实现 GitClienter 接口
 //
-// Codeup 归档接口：GET /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}/archive
-// query: sha=branch, format=tar.gz|zip
+// 走 git host 上的页面归档下载链路（云效新版 OpenAPI 没有对应接口）：
+//
+//	GET https://{gitHost}/{orgId}/{groupPath}/{repoName}/repository/archive.zip?ref={ref}
+//
+// 鉴权用 HTTP Basic Auth（username 任意，password 为 PAT），与 git clone over HTTPS 同款。
 func (c *Codeup) Archive(ctx context.Context, opts *domain.ArchiveOptions) (*domain.GetRepoArchiveResp, error) {
-	orgID, identity := c.splitRepoCtx(opts.Owner, opts.Repo)
-	if orgID == "" || identity == "" {
-		return nil, fmt.Errorf("codeup archive: missing org or repo identity")
+	orgID, identity, err := c.resolveRepoCtx(ctx, opts.Token, opts.Owner, opts.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("codeup archive: %w", err)
 	}
 
 	ref := opts.Ref
 	if ref == "" {
 		ref = "master"
 	}
-	apiURL := fmt.Sprintf("%s%s/archive?sha=%s&format=tar.gz",
-		c.BaseURL(), c.repoPath(orgID, identity), url.QueryEscape(ref))
-	resp, err := c.rawRequest(ctx, "GET", apiURL, opts.Token)
+	apiURL := fmt.Sprintf("%s://%s/%s/%s/repository/archive.zip?ref=%s",
+		c.scheme, c.gitHost, orgID, identity, url.QueryEscape(ref))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.SetBasicAuth("oauth2", opts.Token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("codeup archive: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("codeup archive returned %d: %s", resp.StatusCode, parseError(body))
+	}
+
 	return &domain.GetRepoArchiveResp{
 		ContentLength: resp.ContentLength,
-		ContentType:   "application/gzip",
+		ContentType:   "application/zip",
 		Reader:        resp.Body,
 	}, nil
 }
 
 // Branches 实现 GitClienter 接口
 func (c *Codeup) Branches(ctx context.Context, opts *domain.BranchesOptions) ([]*domain.BranchInfo, error) {
-	orgID, identity := c.splitRepoCtx(opts.Owner, opts.Repo)
-	if orgID == "" || identity == "" {
-		return nil, fmt.Errorf("codeup branches: missing org or repo identity")
+	orgID, identity, err := c.resolveRepoCtx(ctx, opts.Token, opts.Owner, opts.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("codeup branches: %w", err)
 	}
 
 	page := opts.Page
@@ -255,12 +275,13 @@ func (c *Codeup) CreateWebhook(ctx context.Context, opts *domain.CreateWebhookOp
 
 	apiPath := c.repoPath(orgID, identity) + "/webhooks"
 	payload := map[string]any{
-		"url":                opts.WebhookURL,
-		"secretToken":        opts.SecretToken,
-		"pushEvents":         true,
+		"url":                 opts.WebhookURL,
+		"token":               opts.SecretToken,
+		"pushEvents":          true,
 		"mergeRequestsEvents": true,
-		"tagPushEvents":      true,
-		"description":        "MonkeyCode webhook",
+		"tagPushEvents":       true,
+		"noteEvents":          true,
+		"description":         "MonkeyCode webhook",
 	}
 
 	body, err := json.Marshal(payload)
@@ -339,25 +360,6 @@ func (c *Codeup) rawJSON(ctx context.Context, method, fullURL, token string, bod
 	return resp, nil
 }
 
-// splitRepoCtx 还原 codeup 的 orgId + repo identity。
-//
-// 约定：orgId 总是来自客户端构造时注入（来自 db.GitIdentity.OrganizationID）；
-// Owner / Repo 是 group/repo 形式的 identity 组成部分。
-func (c *Codeup) splitRepoCtx(owner, repo string) (string, string) {
-	owner = strings.TrimSpace(owner)
-	repo = strings.TrimSpace(repo)
-	switch {
-	case owner == "" && repo == "":
-		return c.orgID, ""
-	case owner == "":
-		return c.orgID, repo
-	case repo == "":
-		return c.orgID, owner
-	default:
-		return c.orgID, owner + "/" + repo
-	}
-}
-
 func codeupTypeToMode(t string) int {
 	switch strings.ToLower(t) {
 	case "tree", "dir", "directory":
@@ -376,21 +378,6 @@ func isBinaryContent(content []byte) bool {
 		check = check[:8000]
 	}
 	return bytes.Contains(check, []byte{0})
-}
-
-func userField(u *CommitUser, key string) string {
-	if u == nil {
-		return ""
-	}
-	switch key {
-	case "name":
-		return u.Name
-	case "email":
-		return u.Email
-	case "date":
-		return u.Date
-	}
-	return ""
 }
 
 func parseCodeupTime(s string) int64 {

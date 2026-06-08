@@ -7,6 +7,9 @@ const DefaultOpenAPIHost = "openapi-rdc.aliyuncs.com"
 const DefaultGitHost = "codeup.aliyun.com"
 
 // Repository 仓库信息
+//
+// 字段以「查询代码库列表」文档为准；HTTPCloneURL / SSHCloneURL / DefaultBranch / Permissions
+// 在列表接口里不一定出现，但「查询单个代码库」可能返回，保留为可选字段不影响反序列化。
 type Repository struct {
 	ID            int64    `json:"id,omitempty"`
 	Name          string   `json:"name,omitempty"`
@@ -14,12 +17,12 @@ type Repository struct {
 	NameWithNs    string   `json:"nameWithNamespace,omitempty"`
 	PathWithNs    string   `json:"pathWithNamespace,omitempty"`
 	Description   string   `json:"description,omitempty"`
-	VisibilityLvl int      `json:"visibilityLevel,omitempty"` // 0 私有 / 10 内部 / 20 公开
+	Visibility    string   `json:"visibility,omitempty"` // private / internal
 	WebURL        string   `json:"webUrl,omitempty"`
 	HTTPCloneURL  string   `json:"httpCloneUrl,omitempty"`
 	SSHCloneURL   string   `json:"sshCloneUrl,omitempty"`
 	DefaultBranch string   `json:"defaultBranch,omitempty"`
-	Permissions   []string `json:"permissions,omitempty"` // 权限列表
+	Permissions   []string `json:"permissions,omitempty"`
 	Archived      bool     `json:"archived,omitempty"`
 }
 
@@ -40,11 +43,12 @@ type CommitSummary struct {
 
 // TreeNode 文件树节点
 type TreeNode struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	Type string `json:"type,omitempty"` // tree / blob
-	Path string `json:"path,omitempty"`
-	Mode string `json:"mode,omitempty"`
+	ID    string `json:"id,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Type  string `json:"type,omitempty"` // tree / blob / commit
+	Path  string `json:"path,omitempty"`
+	Mode  string `json:"mode,omitempty"`
+	IsLFS bool   `json:"isLFS,omitempty"`
 }
 
 // FileBlob 文件内容
@@ -60,29 +64,28 @@ type FileBlob struct {
 	BlobID      string `json:"blobId,omitempty"`
 }
 
-// CommitUser commit 中的作者/提交者
-type CommitUser struct {
-	Name  string `json:"name,omitempty"`
-	Email string `json:"email,omitempty"`
-	Date  string `json:"date,omitempty"`
+// CommitStats 提交变更行数统计
+type CommitStats struct {
+	Additions int `json:"additions,omitempty"`
+	Deletions int `json:"deletions,omitempty"`
+	Total     int `json:"total,omitempty"`
 }
 
 // CommitItem 完整提交信息
 type CommitItem struct {
-	ID             string      `json:"id,omitempty"`
-	ShortID        string      `json:"shortId,omitempty"`
-	Title          string      `json:"title,omitempty"`
-	Message        string      `json:"message,omitempty"`
-	ParentIDs      []string    `json:"parentIds,omitempty"`
-	AuthorName     string      `json:"authorName,omitempty"`
-	AuthorEmail    string      `json:"authorEmail,omitempty"`
-	AuthoredDate   string      `json:"authoredDate,omitempty"`
-	CommitterName  string      `json:"committerName,omitempty"`
-	CommitterEmail string      `json:"committerEmail,omitempty"`
-	CommittedDate  string      `json:"committedDate,omitempty"`
-	Author         *CommitUser `json:"author,omitempty"`
-	Committer      *CommitUser `json:"committer,omitempty"`
-	WebURL         string      `json:"webUrl,omitempty"`
+	ID             string       `json:"id,omitempty"`
+	ShortID        string       `json:"shortId,omitempty"`
+	Title          string       `json:"title,omitempty"`
+	Message        string       `json:"message,omitempty"`
+	ParentIDs      []string     `json:"parentIds,omitempty"`
+	AuthorName     string       `json:"authorName,omitempty"`
+	AuthorEmail    string       `json:"authorEmail,omitempty"`
+	AuthoredDate   string       `json:"authoredDate,omitempty"`
+	CommitterName  string       `json:"committerName,omitempty"`
+	CommitterEmail string       `json:"committerEmail,omitempty"`
+	CommittedDate  string       `json:"committedDate,omitempty"`
+	Stats          *CommitStats `json:"stats,omitempty"`
+	WebURL         string       `json:"webUrl,omitempty"`
 }
 
 // OrganizationItem 云效组织条目（来自 /oapi/v1/platform/organizations）

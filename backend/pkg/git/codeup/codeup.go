@@ -130,10 +130,86 @@ func splitOrgAndIdentity(path, raw string) (string, string, error) {
 }
 
 // repoPath 返回 /oapi/v1/codeup/organizations/{orgId}/repositories/{repoIdent}
-// repoIdent 既支持数字 ID 也支持 group%2Frepo 形式
+//
+// 云效 OpenAPI 的 repositoryId 接受两种格式：
+//   - 数字 ID（如 2813489）
+//   - URL-encoded 全路径（如 60de7a6852743a5162b5f957%2FDemoRepo，即 {orgId}/{groupPath}/{repoName}）
+//
+// repoIdent 入参可以是「数字 ID」或「不含 orgId 前缀的 {groupPath}/{repoName}」。
+// 这里识别全数字按数字 ID 直传；否则统一拼成全路径再 URL-encode。
 func (c *Codeup) repoPath(orgID, repoIdent string) string {
+	encoded := encodeRepoIdent(orgID, repoIdent)
 	return fmt.Sprintf("/oapi/v1/codeup/organizations/%s/repositories/%s",
-		url.PathEscape(orgID), url.PathEscape(repoIdent))
+		url.PathEscape(orgID), encoded)
+}
+
+// encodeRepoIdent 把 repoIdent 编码为云效 OpenAPI 期望的 repositoryId 形式。
+func encodeRepoIdent(orgID, repoIdent string) string {
+	repoIdent = strings.TrimSpace(repoIdent)
+	if repoIdent == "" {
+		return ""
+	}
+	if isAllDigits(repoIdent) {
+		return url.PathEscape(repoIdent)
+	}
+	// 已经带 orgId 前缀就不要重复拼
+	prefix := orgID + "/"
+	if !strings.HasPrefix(repoIdent, prefix) {
+		repoIdent = prefix + repoIdent
+	}
+	return url.PathEscape(repoIdent)
+}
+
+// encodeFilePath 把文件路径编成云效 OpenAPI 文件接口期望的 path 段：URL-encode 后把 / 换成 %2F。
+func encodeFilePath(p string) string {
+	return strings.ReplaceAll(url.PathEscape(p), "/", "%2F")
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveRepoCtx 解析当前 orgID 与 repo identity。
+//
+//   - orgID 优先用客户端构造时注入的；为空时用 token 调 ResolveOrgID 取 PAT 的第一个组织。
+//   - identity 由 owner / repo 拼成「{groupPath}/{repoName}」形式（不含 orgId）。
+func (c *Codeup) resolveRepoCtx(ctx context.Context, token, owner, repo string) (string, string, error) {
+	orgID := c.orgID
+	if orgID == "" {
+		resolved, err := c.ResolveOrgID(ctx, token)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve organization: %w", err)
+		}
+		orgID = resolved
+	}
+	identity := assembleIdentity(owner, repo)
+	if identity == "" {
+		return "", "", fmt.Errorf("missing repo identity")
+	}
+	return orgID, identity, nil
+}
+
+func assembleIdentity(owner, repo string) string {
+	owner = strings.TrimSpace(owner)
+	repo = strings.TrimSpace(repo)
+	switch {
+	case owner == "" && repo == "":
+		return ""
+	case owner == "":
+		return repo
+	case repo == "":
+		return owner
+	default:
+		return owner + "/" + repo
+	}
 }
 
 // ListOrganizations 列出 PAT 所属的全部云效组织。
@@ -207,7 +283,7 @@ func (c *Codeup) CheckPAT(ctx context.Context, token, repoURL string) (bool, *do
 		FullName:        firstNonEmpty(repo.PathWithNs, repo.NameWithNs, identity),
 		RepoURL:         web,
 		RepoDescription: repo.Description,
-		IsPrivate:       repo.VisibilityLvl == 0,
+		IsPrivate:       strings.EqualFold(repo.Visibility, "private"),
 		Platform:        "codeup",
 	}, nil
 }
