@@ -85,21 +85,15 @@ type CommitItem struct {
 	WebURL         string      `json:"webUrl,omitempty"`
 }
 
-// OrganizationItem 云效组织
+// OrganizationItem 云效组织条目（来自 /oapi/v1/platform/organizations）
 type OrganizationItem struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-}
-
-// CurrentUser 当前用户
-type CurrentUser struct {
 	ID          string `json:"id,omitempty"`
-	Username    string `json:"username,omitempty"`
 	Name        string `json:"name,omitempty"`
-	Email       string `json:"email,omitempty"`
-	AvatarURL   string `json:"avatarUrl,omitempty"`
-	OrgID       string `json:"orgId,omitempty"`
-	OrgName     string `json:"orgName,omitempty"`
+	Description string `json:"description,omitempty"`
+	CreatorID   string `json:"creatorId,omitempty"`
+	DefaultRole string `json:"defaultRole,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	UpdateAt    string `json:"updateAt,omitempty"`
 }
 
 // WebhookItem 仓库 webhook

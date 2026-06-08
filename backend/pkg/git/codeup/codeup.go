@@ -136,27 +136,17 @@ func (c *Codeup) repoPath(orgID, repoIdent string) string {
 		url.PathEscape(orgID), url.PathEscape(repoIdent))
 }
 
-func (c *Codeup) resolveOrgID(explicit string) string {
-	if explicit != "" {
-		return explicit
-	}
-	return c.orgID
-}
-
-// GetCurrentUser 获取当前 token 对应的用户信息（含组织）
-func (c *Codeup) GetCurrentUser(ctx context.Context, token string) (*CurrentUser, error) {
-	user, err := request.Get[CurrentUser](c.client, ctx, "/oapi/v1/codeup/users/current",
-		request.WithHeader(c.authHeader(token)))
-	if err != nil {
-		return nil, fmt.Errorf("get current user: %w", err)
-	}
-	return user, nil
-}
-
-// ListOrganizations 获取当前 token 所属的组织列表
+// ListOrganizations 列出 PAT 所属的全部云效组织。
+//
+//	GET /oapi/v1/platform/organizations
+//	Header: x-yunxiao-token
+//
+// 中心版/标准版均支持 PAT 调用，返回结构为 [{id, name, ...}]。
 func (c *Codeup) ListOrganizations(ctx context.Context, token string) ([]*OrganizationItem, error) {
-	orgs, err := request.Get[[]*OrganizationItem](c.client, ctx, "/oapi/v1/codeup/organizations",
-		request.WithHeader(c.authHeader(token)))
+	orgs, err := request.Get[[]*OrganizationItem](c.client, ctx, "/oapi/v1/platform/organizations",
+		request.WithHeader(c.authHeader(token)),
+		request.WithQuery(request.Query{"perPage": "100"}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list organizations: %w", err)
 	}
@@ -166,11 +156,10 @@ func (c *Codeup) ListOrganizations(ctx context.Context, token string) ([]*Organi
 	return *orgs, nil
 }
 
-// ResolveOrgID 自动解析 token 对应的默认组织 ID（取第一个）
+// ResolveOrgID 取 PAT 所属的第一个组织的 ID。
+//
+// 多组织时只取第一个；用户若希望使用另一组织，可在编辑身份时手动覆盖 organization_id。
 func (c *Codeup) ResolveOrgID(ctx context.Context, token string) (string, error) {
-	if user, err := c.GetCurrentUser(ctx, token); err == nil && user.OrgID != "" {
-		return user.OrgID, nil
-	}
 	orgs, err := c.ListOrganizations(ctx, token)
 	if err != nil {
 		return "", err
@@ -223,18 +212,17 @@ func (c *Codeup) CheckPAT(ctx context.Context, token, repoURL string) (bool, *do
 	}, nil
 }
 
-// UserInfo 实现 GitClienter 接口
+// UserInfo 实现 GitClienter 接口。
+//
+// 云效 OpenAPI 没有提供仅凭 PAT 获取当前用户的接口（GetCurrentUser 系列均不存在）。
+// 此处返回空名以满足接口约定；调用方需要时应当从 GitIdentity.Username 字段读取用户绑定时填写的名字。
 func (c *Codeup) UserInfo(ctx context.Context, token string) (*domain.PlatformUserInfo, error) {
-	user, err := c.GetCurrentUser(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	return &domain.PlatformUserInfo{Name: firstNonEmpty(user.Username, user.Name, user.Email)}, nil
+	return &domain.PlatformUserInfo{Name: ""}, nil
 }
 
 // Repositories 列出当前用户在组织内可访问的仓库
 func (c *Codeup) Repositories(ctx context.Context, opts *domain.RepositoryOptions) ([]domain.AuthRepository, error) {
-	orgID := c.resolveOrgID("")
+	orgID := c.orgID
 	if orgID == "" {
 		resolved, err := c.ResolveOrgID(ctx, opts.Token)
 		if err != nil {
