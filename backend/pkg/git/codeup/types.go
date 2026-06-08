@@ -1,7 +1,34 @@
 package codeup
 
+import (
+	"bytes"
+	"strconv"
+)
+
 // 默认 OpenAPI 域名（公网公共站）
 const DefaultOpenAPIHost = "openapi-rdc.aliyuncs.com"
+
+// flexibleInt 兼容云效返回的 int 或字符串数字（如 "1666"）。
+type flexibleInt int
+
+func (f *flexibleInt) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+	if data[0] == '"' && data[len(data)-1] == '"' {
+		data = data[1 : len(data)-1]
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	n, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return err
+	}
+	*f = flexibleInt(n)
+	return nil
+}
 
 // 默认 Git clone 域名
 const DefaultGitHost = "codeup.aliyun.com"
@@ -52,16 +79,18 @@ type TreeNode struct {
 }
 
 // FileBlob 文件内容
+//
+// 注意：云效返回的 size 字段有时是字符串（如 "1666"），有时是数字，用 flexibleInt 兼容。
 type FileBlob struct {
-	FileName    string `json:"fileName,omitempty"`
-	FilePath    string `json:"filePath,omitempty"`
-	Size        int    `json:"size,omitempty"`
-	Encoding    string `json:"encoding,omitempty"` // base64 / text
-	Content     string `json:"content,omitempty"`
-	CommitID    string `json:"commitId,omitempty"`
-	LastCommitID string `json:"lastCommitId,omitempty"`
-	Ref         string `json:"ref,omitempty"`
-	BlobID      string `json:"blobId,omitempty"`
+	FileName    string       `json:"fileName,omitempty"`
+	FilePath    string       `json:"filePath,omitempty"`
+	Size        flexibleInt  `json:"size,omitempty"`
+	Encoding    string       `json:"encoding,omitempty"` // base64 / text
+	Content     string       `json:"content,omitempty"`
+	CommitID    string       `json:"commitId,omitempty"`
+	LastCommitID string      `json:"lastCommitId,omitempty"`
+	Ref         string       `json:"ref,omitempty"`
+	BlobID      string       `json:"blobId,omitempty"`
 }
 
 // CommitStats 提交变更行数统计

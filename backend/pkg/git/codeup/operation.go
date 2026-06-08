@@ -119,7 +119,7 @@ func (c *Codeup) Blob(ctx context.Context, opts *domain.BlobOptions) (*domain.Ge
 		Content:  content,
 		IsBinary: isBinaryContent(content),
 		Sha:      firstNonEmpty(blob.BlobID, blob.LastCommitID, blob.CommitID),
-		Size:     blob.Size,
+		Size:     int(blob.Size),
 	}, nil
 }
 
